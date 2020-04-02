@@ -10,5 +10,6 @@ public class Test {
         System.setProperty("java.net.preferIPv4Stack", "true");
         String property = System.getProperty("java.net.preferIPv4Stack");
         System.out.println(property);
+        System.out.println();
     }
 }
