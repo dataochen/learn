@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
 public class ZkReadWriteLock {
     private static final Logger LOGGER = LoggerFactory.getLogger(ZkReadWriteLock.class);
 
-    private static final String path = "/zk/readWriteLock/";
+    private static final String path = "/zk/readWriteLock";
     private static volatile ZkReadWriteLock instance;
     private ZkClient zkClient;
     private Object lock;
@@ -71,7 +71,7 @@ public class ZkReadWriteLock {
      * @return
      */
     public boolean readLock(long timeOut) {
-        String fullPath = path + "read_";
+        String fullPath = path + "/read_";
         String ephemeralSequential = zkClient.createEphemeralSequential(fullPath, null);
 //        ====
         List<String> children = zkClient.getChildren(path);
@@ -79,25 +79,26 @@ public class ZkReadWriteLock {
             LOGGER.info("无任何子节点，获取读锁成功");
             return true;
         }
+        List<String> collect = children.stream().filter(path -> path.contains("write")).map(this::getNum).collect(Collectors.toList());
+        if (null == collect || collect.size() == 0) {
+            LOGGER.info("无任何子节点包含write，获取读锁成功");
+            return true;
+        }
         TreeSet<String> strings = new TreeSet<>();
-        strings.addAll(children);
-        SortedSet<String> lessPathSet = strings.headSet(ephemeralSequential);
+        strings.addAll(collect);
+        SortedSet<String> lessPathSet = strings.headSet(getNum(ephemeralSequential));
         if (0 == lessPathSet.size()) {
             LOGGER.info("无小于当前线程序列号的节点，获取读锁成功");
             return true;
         }
-        List<String> write = lessPathSet.stream().filter(path -> path.contains("write")).collect(Collectors.toList());
-        if (null == write || write.size() == 0) {
-            LOGGER.info("无任何子节点包含write，获取读锁成功");
-            return true;
-        }
 //        z节点 含有write的子节点并且序列号小于当前线程创建的节点序列号j
-        String last = write.get(write.size() - 1);
+        String last1 = lessPathSet.last();
+        String last = children.stream().filter(x -> x.contains(last1)).findFirst().get();
         CountDownLatch countDownLatch = new CountDownLatch(1);
         IZkChildListener iZkChildListener = (parentPath, currentChilds) -> {
             countDownLatch.countDown();
         };
-        zkClient.subscribeChildChanges(last, iZkChildListener);
+        zkClient.subscribeChildChanges(path+"/"+last, iZkChildListener);
 //受阻
         //            异步计时器 超时解除countDownLatch
         try {
@@ -109,7 +110,7 @@ public class ZkReadWriteLock {
         } catch (InterruptedException e) {
             return false;
         }
-        zkClient.unsubscribeChildChanges(path, iZkChildListener);
+        zkClient.unsubscribeChildChanges(path+"/"+last, iZkChildListener);
         return true;
     }
 
@@ -118,7 +119,7 @@ public class ZkReadWriteLock {
      * X节点，当节点消失后重新判断是否可以获取锁。
      */
     public boolean writeLock(long timeOut) {
-        String fullPath = path + "write_";
+        String fullPath = path + "/write_";
         String ephemeralSequential = zkClient.createEphemeralSequential(fullPath, null);
 //        ====
         List<String> children = zkClient.getChildren(path);
@@ -126,20 +127,22 @@ public class ZkReadWriteLock {
             LOGGER.info("无任何子节点，获取写锁成功");
             return true;
         }
+        List<String> collect = children.stream().map(this::getNum).collect(Collectors.toList());
         TreeSet<String> strings = new TreeSet<>();
-        strings.addAll(children);
-        SortedSet<String> lessPathSet = strings.headSet(ephemeralSequential);
+        strings.addAll(collect);
+        SortedSet<String> lessPathSet = strings.headSet(getNum(ephemeralSequential));
         if (0 == lessPathSet.size()) {
             LOGGER.info("无小于当前线程序列号的节点，获取写锁成功");
             return true;
         }
 //        z节点 含有write的子节点并且序列号小于当前线程创建的节点序列号j
-        String last = lessPathSet.last();
+        String last1 = lessPathSet.last();
+        String last = children.stream().filter(x -> x.contains(last1)).findFirst().get();
         CountDownLatch countDownLatch = new CountDownLatch(1);
         IZkChildListener iZkChildListener = (parentPath, currentChilds) -> {
             countDownLatch.countDown();
         };
-        zkClient.subscribeChildChanges(last, iZkChildListener);
+        zkClient.subscribeChildChanges(path+"/"+last, iZkChildListener);
 //受阻
         //            异步计时器 超时解除countDownLatch
         try {
@@ -151,8 +154,48 @@ public class ZkReadWriteLock {
         } catch (InterruptedException e) {
             return false;
         }
-        zkClient.unsubscribeChildChanges(path, iZkChildListener);
+        zkClient.unsubscribeChildChanges(path+"/"+last, iZkChildListener);
         return true;
+    }
+
+    public void unReadLock() {
+        // TODO: 2020/7/6  
+    }
+
+    private String getNum(String currentPath) {
+        if (currentPath.contains(path)) {
+            currentPath = currentPath.substring(18);
+        }
+        if (currentPath.contains("read_")) {
+            return currentPath.substring(5);
+        } else if (currentPath.contains("write_")) {
+            return currentPath.substring(6);
+        } else {
+            return currentPath;
+        }
+    }
+    
+
+    public static void main(String[] args) {
+        ZkReadWriteLock lock = ZkReadWriteLock.getInstance("127.0.0.1");
+        new Thread(() -> {
+            lock.readLock(3000);
+            try {
+                Thread.sleep(2000L);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            System.out.println(Thread.currentThread().getName());
+        }).start();
+        new Thread(() -> {
+            lock.readLock(3000);
+            System.out.println(Thread.currentThread().getName());
+        }).start();
+        new Thread(() -> {
+            lock.writeLock(3000);
+            System.out.println(Thread.currentThread().getName());
+        }).start();
+
     }
 
 }
