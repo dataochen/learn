@@ -34,7 +34,7 @@ public class ZkLock {
         return;
     }
 
-    public ZkLock() {
+    private ZkLock() {
     }
 
     private ZkLock(String address) {
