@@ -14,6 +14,8 @@ import java.util.TreeSet;
 /**
  * @author dataochen
  * @Description 选主
+ * 节点最小的为leader
+ * leader消失后 自动选举此时刻最小的有效节点
  * @date: 2020/7/7 16:11
  */
 public class ZkLeadElection {
@@ -22,7 +24,7 @@ public class ZkLeadElection {
     private static final String path = "/zk/election";
     private static volatile ZkLeadElection instance;
     private ZkClient zkClient;
-    private static final String leaderPath="/zk/leader";
+    private static final String leaderPath = "/zk/leader";
 
     private ZkLeadElection(String address) {
         init(address);
@@ -45,7 +47,7 @@ public class ZkLeadElection {
             zkClient.createPersistent(path, true);
         }
         if (!zkClient.exists(leaderPath)) {
-            zkClient.createPersistent(leaderPath,true);
+            zkClient.createPersistent(leaderPath, true);
         }
     }
 
@@ -56,22 +58,22 @@ public class ZkLeadElection {
     public void electionLeader(String nickName) {
         String ephemeralSequential = zkClient.createEphemeralSequential(path + "/zt", null);
         System.out.println(ephemeralSequential);
-logicCommon(ephemeralSequential,nickName);
+        logicCommon(ephemeralSequential, nickName);
 
     }
 
-    private void logicCommon(String ephemeralSequential,String nickName) {
+    private void logicCommon(String ephemeralSequential, String nickName) {
         List<String> children = zkClient.getChildren(path);
         if (null == children || children.size() == 0) {
-            zkClient.writeData(leaderPath,nickName);
+            zkClient.writeData(leaderPath, nickName);
             return;
         }
         TreeSet<String> strings = new TreeSet<>();
         strings.addAll(children);
-        SortedSet<String> lessPathSet = strings.headSet(ephemeralSequential.substring(path.length()+1));
+        SortedSet<String> lessPathSet = strings.headSet(ephemeralSequential.substring(path.length() + 1));
         if (0 == lessPathSet.size()) {
-            LOGGER.info("无小于当前线程序列号的节点，此节点为领导者" + ephemeralSequential+";"+nickName);
-            zkClient.writeData(leaderPath,nickName);
+            LOGGER.info("无小于当前线程序列号的节点，此节点为领导者" + ephemeralSequential + ";" + nickName);
+            zkClient.writeData(leaderPath, nickName);
             return;
         }
         String last1 = lessPathSet.last();
@@ -101,9 +103,9 @@ logicCommon(ephemeralSequential,nickName);
 //            String last2 = children2.stream().filter(x -> x.contains(last12)).findFirst().get();
 //            LOGGER.warn("2继续监听上一个有效节点"+last2);
 //            zkClient.exists(path + "/" + last2);
-            logicCommon(ephemeralSequential,nickName);
+            logicCommon(ephemeralSequential, nickName);
         };
-        System.out.println("监听last"+last);
+        System.out.println("监听last" + last);
         zkClient.subscribeChildChanges(path + "/" + last, iZkChildListener);
     }
 
@@ -111,13 +113,13 @@ logicCommon(ephemeralSequential,nickName);
         ZkLeadElection zk = ZkLeadElection.getInstance("127.0.0.1");
         double random = Math.random();
         System.out.println(random);
-        zk.electionLeader(Thread.currentThread().getName()+random);
+        zk.electionLeader(Thread.currentThread().getName() + random);
 
 //        new Thread(()->{zk.electionLeader("线程1");}).start();
 
 //        new Thread(()->{zk.electionLeader("线程2");}).start();
         Object leader = zk.zkClient.readData(leaderPath);
-        System.out.println("领导节点是"+leader);
+        System.out.println("领导节点是" + leader);
         System.in.read();
     }
 }
