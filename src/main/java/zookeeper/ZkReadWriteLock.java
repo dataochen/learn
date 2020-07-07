@@ -76,6 +76,55 @@ public class ZkReadWriteLock {
         String fullPath = path + "/read_";
         String ephemeralSequential = zkClient.createEphemeralSequential(fullPath, null);
 //        ====
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        String s = commonLogicRead(ephemeralSequential, countDownLatch);
+        if (null != s) {
+            return s;
+        }
+//受阻
+        //            异步计时器 超时解除countDownLatch
+        try {
+            boolean await = countDownLatch.await(timeOut, TimeUnit.MILLISECONDS);
+            if (!await) {
+                System.out.println("获取读锁超时 timeOut=" + timeOut);
+                return null;
+            }
+        } catch (InterruptedException e) {
+            return null;
+        }
+//        zkClient.unsubscribeChildChanges(path + "/" + last, iZkChildListener);
+        return ephemeralSequential;
+    }
+
+    /**
+     * 如果/zk/readWriteLock中不存在X节点（序列号小于当前线程创建的节点序列号j，无论read还是write，此节点是里j最近的小序列号节点）则可获取锁；否则需要监听
+     * X节点，当节点消失后重新判断是否可以获取锁。
+     */
+    public String writeLock(long timeOut) {
+        String fullPath = path + "/write_";
+        String ephemeralSequential = zkClient.createEphemeralSequential(fullPath, null);
+//        ====
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        String s = commonLogicWrite(ephemeralSequential, countDownLatch);
+        if (null != s) {
+            return s;
+        }
+//阻塞
+        //            异步计时器 超时解除countDownLatch
+        try {
+            boolean await = countDownLatch.await(timeOut, TimeUnit.MILLISECONDS);
+            if (!await) {
+                System.out.println("获取写锁超时 timeOut=" + timeOut);
+                return null;
+            }
+        } catch (InterruptedException e) {
+            return null;
+        }
+//        zkClient.unsubscribeChildChanges(path + "/" + last, iZkChildListener);
+        return ephemeralSequential;
+    }
+
+    private String commonLogicRead(String ephemeralSequential, CountDownLatch countDownLatch) {
         List<String> children = zkClient.getChildren(path);
         if (null == children || children.size() == 0) {
             LOGGER.info("无任何子节点，获取读锁成功");
@@ -96,35 +145,39 @@ public class ZkReadWriteLock {
 //        z节点 含有write的子节点并且序列号小于当前线程创建的节点序列号j
         String last1 = lessPathSet.last();
         String last = children.stream().filter(x -> x.contains(last1)).findFirst().get();
-        CountDownLatch countDownLatch = new CountDownLatch(1);
         IZkChildListener iZkChildListener = (parentPath, currentChilds) -> {
-            System.out.println("收到通知，获取读锁"+parentPath);
-            countDownLatch.countDown();
-        };
-        zkClient.subscribeChildChanges(path + "/" + last, iZkChildListener);
-//受阻
-        //            异步计时器 超时解除countDownLatch
-        try {
-            boolean await = countDownLatch.await(timeOut, TimeUnit.MILLISECONDS);
-            if (!await) {
-                System.out.println("获取读锁超时 timeOut=" + timeOut);
-                return null;
+            System.out.println("收到通知，获取读锁" + parentPath);
+            //            需要判断是否是最小子节点 如果不是 继续监听比当前子节点小但是最靠近的子节点；例子：01,02,03；03监听了02子节点，
+// 但是如果02客户端关闭会导致03收到通知，所以必须再次判断03是不是最小节点。如果不是监听01节点（02已无效）
+//            List<String> children2 = zkClient.getChildren(path);
+//            if (null == children2 || children2.size() == 0) {
+//                LOGGER.info("无任何子节点，获取写锁成功");
+//                countDownLatch.countDown();
+//                return;
+//            }
+//            List<String> collect2 = children2.stream().map(this::getNum).collect(Collectors.toList());
+//            TreeSet<String> strings2 = new TreeSet<>();
+//            strings2.addAll(collect2);
+//            SortedSet<String> lessPathSet2 = strings2.headSet(getNum(ephemeralSequential));
+//            if (0 == lessPathSet2.size()) {
+//                LOGGER.info("无小于当前线程序列号的节点，获取写锁成功");
+//                countDownLatch.countDown();
+//                return;
+//            }
+////        z节点 含有write的子节点并且序列号小于当前线程创建的节点序列号j
+//            String last12 = lessPathSet2.last();
+//            String last2 = children2.stream().filter(x -> x.contains(last12)).findFirst().get();
+//            zkClient.exists(path + "/" + last2);
+            String s = commonLogicRead(ephemeralSequential, countDownLatch);
+            if (null != s) {
+                countDownLatch.countDown();
             }
-        } catch (InterruptedException e) {
-            return null;
-        }
-        zkClient.unsubscribeChildChanges(path + "/" + last, iZkChildListener);
-        return ephemeralSequential;
+        };
+//        zkClient.subscribeChildChanges(path + "/" + last, iZkChildListener);
+        return null;
     }
 
-    /**
-     * 如果/zk/readWriteLock中不存在X节点（序列号小于当前线程创建的节点序列号j，无论read还是write，此节点是里j最近的小序列号节点）则可获取锁；否则需要监听
-     * X节点，当节点消失后重新判断是否可以获取锁。
-     */
-    public String writeLock(long timeOut) {
-        String fullPath = path + "/write_";
-        String ephemeralSequential = zkClient.createEphemeralSequential(fullPath, null);
-//        ====
+    private String commonLogicWrite(String ephemeralSequential, CountDownLatch countDownLatch) {
         List<String> children = zkClient.getChildren(path);
         if (null == children || children.size() == 0) {
             LOGGER.info("无任何子节点，获取写锁成功");
@@ -141,29 +194,18 @@ public class ZkReadWriteLock {
 //        z节点 含有write的子节点并且序列号小于当前线程创建的节点序列号j
         String last1 = lessPathSet.last();
         String last = children.stream().filter(x -> x.contains(last1)).findFirst().get();
-        CountDownLatch countDownLatch = new CountDownLatch(1);
         IZkChildListener iZkChildListener = (parentPath, currentChilds) -> {
-            System.out.println("收到通知，获取写锁"+parentPath);
-            countDownLatch.countDown();
+            String s = commonLogicWrite(ephemeralSequential, countDownLatch);
+            if (null != s) {
+                countDownLatch.countDown();
+            }
         };
         zkClient.subscribeChildChanges(path + "/" + last, iZkChildListener);
-//受阻
-        //            异步计时器 超时解除countDownLatch
-        try {
-            boolean await = countDownLatch.await(timeOut, TimeUnit.MILLISECONDS);
-            if (!await) {
-                System.out.println("获取写锁超时 timeOut=" + timeOut);
-                return null;
-            }
-        } catch (InterruptedException e) {
-            return null;
-        }
-        zkClient.unsubscribeChildChanges(path + "/" + last, iZkChildListener);
-        return ephemeralSequential;
+        return null;
     }
 
     public void unReadLock(String ephemeralSequential) {
-        System.out.println("读锁解锁"+Thread.currentThread().getName());
+        System.out.println("读锁解锁" + Thread.currentThread().getName());
         if (StringUtils.isEmpty(ephemeralSequential)) {
             return;
         }
@@ -173,7 +215,7 @@ public class ZkReadWriteLock {
     }
 
     public void unWriteLock(String ephemeralSequential) {
-        System.out.println("写锁解锁"+Thread.currentThread().getName());
+        System.out.println("写锁解锁" + Thread.currentThread().getName());
         if (StringUtils.isEmpty(ephemeralSequential)) {
             return;
         }
