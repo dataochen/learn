@@ -19,6 +19,10 @@ public class ThreadFastErrorUtil {
     private ThreadFastErrorUtil() {
     }
 
+    /**
+     * 使用单例 防止使用此工具的人每次都不传线程池，导致每次都创建线程池。也为了方便管理。
+     * @return
+     */
     public static ThreadFastErrorUtil getInstance() {
         return getInstance(null);
     }
@@ -34,6 +38,10 @@ public class ThreadFastErrorUtil {
         return instance;
     }
 
+    /**
+     * 如果自定义了线程池 优先用自定义的 否则使用默认的
+     * @param executor
+     */
     private ThreadFastErrorUtil(Executor executor) {
         if (executor == null) {
             executor = new ThreadPoolExecutor(5, 5, 2000,
@@ -48,6 +56,9 @@ public class ThreadFastErrorUtil {
         this.executor = executor;
     }
 
+    /**
+     * 定义此工具类的线程池的线程名称 便于日志定位和管理
+     */
     class FastErrorUtilThreadFactory implements ThreadFactory {
         private final AtomicInteger poolNumber = new AtomicInteger(1);
         private final ThreadGroup group;
@@ -92,6 +103,7 @@ public class ThreadFastErrorUtil {
     }
 
     /**
+     * 泛型化参数 支持用户自选扩展使用
      * @param tasks
      * @param <T>
      * @return
@@ -170,7 +182,4 @@ public class ThreadFastErrorUtil {
      */
 
 
-    public static void main(String[] args) {
-        FastErrorResponse fastErrorResponse = ThreadFastErrorUtil.getInstance().fastCheckAsync(null);
-    }
 }
